@@ -124,3 +124,40 @@ resource "aws_lambda_permission" "allow_eventbridge" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.s3_put_event.arn
 }
+
+
+# IAM Role for EventBridge to trigger CodeBuild
+resource "aws_iam_role" "eventbridge_invoke_codebuild_role" {
+  name = "eventbridge-invoke-codebuild-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Service = "events.amazonaws.com"
+        },
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# IAM Policy to allow EventBridge to start the CodeBuild project
+resource "aws_iam_role_policy" "eventbridge_codebuild_policy" {
+  role = aws_iam_role.eventbridge_invoke_codebuild_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "codebuild:StartBuild"
+        ],
+        Resource = aws_codebuild_project.my_codebuild_project.arn
+      }
+    ]
+  })
+}
