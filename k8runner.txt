@@ -1,0 +1,137 @@
+PoC: Running GitHub Self-Hosted Runners in Kubernetes with Persistent Storage
+Objective
+The goal of this PoC is to deploy GitHub self-hosted runners in Kubernetes using a Personal Access Token (PAT) for authentication, with each runner having persistent storage.
+
+Prerequisites
+Kubernetes cluster (either self-hosted or managed, like EKS, GKE, or AKS).
+Helm installed on your local machine.
+A GitHub repository or organization with a generated Personal Access Token (PAT) that has the required permissions for GitHub Actions.
+Kubernetes storage provisioner (e.g., AWS EBS for EKS, GCEPersistentDisk for GKE, or a standard NFS provisioner).
+Steps to Follow
+1. Generate a GitHub Personal Access Token (PAT)
+To create the PAT:
+
+Go to GitHub → Settings → Developer settings → Personal access tokens.
+Click Generate new token.
+Select scopes:
+repo (for repository-level runners)
+admin:org (for organization-level runners, optional)
+Save the token somewhere secure.
+2. Deploy Helm Chart for GitHub Runner
+You can use the actions-runner-controller or a custom Helm chart for deploying GitHub runners to your Kubernetes cluster. Below is an example using actions-runner-controller:
+
+Install the Actions Runner Controller
+
+COMMANDS
+helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
+helm repo update
+
+Install the Controller
+Install the runner controller in your Kubernetes cluster.
+
+kubectl create ns actions-runner-system
+helm upgrade --install --namespace actions-runner-system actions-runner-controller actions-runner-controller/actions-runner-controller
+
+Create Kubernetes Secrets for PAT
+To safely provide your PAT token to the Kubernetes cluster, create a secret:
+
+kubectl create secret generic controller-manager \
+  -n actions-runner-system \
+  --from-literal=github_token=<your-personal-access-token>
+
+
+3. Define Runner with Persistent Storage
+Create a runner that uses persistent storage. Below is an example of a RunnerDeployment with a persistent volume claim (PVC):
+
+Sample YAML for RunnerDeployment with PVC
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: github-runner-deployment
+  namespace: actions-runner-system
+spec:
+  replicas: 2
+  template:
+    spec:
+      organization: <your-github-organization>
+      image: summerwind/actions-runner:latest
+      env:
+        - name: RUNNER_WORKDIR
+          value: /runner/_work
+      volumeMounts:
+        - mountPath: /runner/_work
+          name: runner-workdir
+      volumes:
+        - name: runner-workdir
+          persistentVolumeClaim:
+            claimName: runner-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: runner-pvc
+  namespace: actions-runner-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+4. Storage Setup
+In the PersistentVolumeClaim section, we specify a storage request of 10Gi. You can modify the storage size based on your requirements. If your cluster uses dynamic provisioning, the storage class will be automatically provisioned, or you can specify a
+specific storage class like so:
+spec:
+  storageClassName: <your-storage-class>
+
+5. Apply the Configuration
+Once you have defined your YAML configuration files, apply them to your Kubernetes cluster:
+kubectl apply -f runner-deployment.yaml
+
+This will create the runner pods with the specified number of replicas (in this case, 2), and each pod will have access to a persistent volume.
+
+6. Verify the Deployment
+Check if the runner pods are running and bound to the persistent storage:
+kubectl get pods -n actions-runner-system
+kubectl get pvc -n actions-runner-system
+
+
+7. View the Runner in GitHub
+After deployment, navigate to your GitHub repository or organization settings:
+
+Go to Settings → Actions → Runners.
+You should see your self-hosted runners registered and ready to execute jobs.
+8. Troubleshooting
+Ensure your PAT token has the required permissions for registering runners.
+Ensure that your storage class is correctly configured in Kubernetes.
+Verify that the controller is installed and running in the actions-runner-system namespace.
+
+
+
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: github-runner-deployment
+  namespace: actions-runner-system
+spec:
+  replicas: 2
+  template:
+    spec:
+      organization: <your-github-organization> # Or you can specify repository using 'repository'
+      image: summerwind/actions-runner:latest
+      labels:
+        - kubernetes
+        - custom-label
+      env:
+        - name: RUNNER_WORKDIR
+          value: /runner/_work
+      volumeMounts:
+        - mountPath: /runner/_work
+          name: runner-workdir
+      volumes:
+        - name: runner-workdir
+          persistentVolumeClaim:
+            claimName: runner-pvc
+
+
+
