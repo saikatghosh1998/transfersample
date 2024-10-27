@@ -1,0 +1,85 @@
+import subprocess
+import requests
+import os
+import shutil
+
+# Configuration variables
+BITBUCKET_SERVER_URL = "https://bitbucket.yourcompany.com"  # Base URL for Bitbucket Server
+BITBUCKET_USERNAME = "your_bitbucket_username"
+BITBUCKET_APP_PASSWORD = "your_bitbucket_app_password"
+GITHUB_ORG = "your_github_organization"  # GitHub organization name
+GITHUB_TOKEN = "your_github_token"
+REPO_FILE = "repositories.txt"  # Text file with repository names, one per line
+
+# Function to migrate a repository
+def migrate_repo(repo_name):
+    # Construct the Bitbucket Server repository URL
+    bitbucket_repo = f"{BITBUCKET_SERVER_URL}/scm/project_key/{repo_name}.git"
+    bitbucket_repo_auth = f"https://{BITBUCKET_USERNAME}:{BITBUCKET_APP_PASSWORD}@{BITBUCKET_SERVER_URL.split('//')[1]}/scm/project_key/{repo_name}.git"
+    
+    print(f"Cloning Bitbucket Server repository: {bitbucket_repo}")
+    
+    # Clone the Bitbucket repository with the mirror option
+    clone_result = subprocess.run(["git", "clone", "--mirror", bitbucket_repo_auth], capture_output=True)
+    if clone_result.returncode != 0:
+        print(f"Failed to clone repository: {repo_name}")
+        return
+
+    # Change directory to the cloned repository
+    repo_dir = f"{repo_name}.git"
+    if not os.path.isdir(repo_dir):
+        print(f"Directory {repo_dir} not found")
+        return
+    os.chdir(repo_dir)
+
+    # Create the GitHub repository under the organization
+    print(f"Creating GitHub repository for: {repo_name}")
+    github_api_url = f"https://api.github.com/orgs/{GITHUB_ORG}/repos"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    payload = {"name": repo_name, "private": True}
+    response = requests.post(github_api_url, json=payload, auth=(GITHUB_TOKEN, ''))
+    
+    # Check if the repository was created successfully
+    if response.status_code == 201:
+        print(f"Successfully created GitHub repository for: {repo_name}")
+    else:
+        print(f"Failed to create GitHub repository for: {repo_name}. Response: {response.text}")
+        os.chdir("..")
+        shutil.rmtree(repo_dir)
+        return
+
+    # Push all branches, commits, and tags to GitHub
+    github_repo_url = f"https://github.com/{GITHUB_ORG}/{repo_name}.git"
+    subprocess.run(["git", "remote", "add", "github", github_repo_url], check=True)
+    
+    print(f"Pushing to GitHub: {github_repo_url}")
+    push_result = subprocess.run(["git", "push", "--mirror", "github"], capture_output=True)
+    if push_result.returncode != 0:
+        print(f"Failed to push repository: {repo_name}")
+    
+    # Cleanup
+    print(f"Deleting {repo_dir} from local")
+    os.chdir("..")
+    shutil.rmtree(repo_dir)
+
+# Check if the repository file exists
+if not os.path.isfile(REPO_FILE):
+    print(f"Repository file {REPO_FILE} not found.")
+    exit(1)
+
+print(f"Reading repositories from {REPO_FILE}...")
+with open(REPO_FILE, "r") as file:
+    for line in file:
+        repo_name = line.strip()
+        
+        # Skip empty lines
+        if not repo_name:
+            print("Skipping empty line in repository file")
+            continue
+        
+        print(f"Read repository: '{repo_name}'")
+        
+        # Migrate the repository
+        migrate_repo(repo_name)
+
+print("Finished reading repositories.")
