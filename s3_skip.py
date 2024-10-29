@@ -14,12 +14,13 @@ def list_s3_buckets_with_policies():
         
         # Attempt to get the bucket policy, handle permission errors
         try:
-            policy = s3_client.get_bucket_policy(Bucket=bucket_name)['Policy']
+            policy_response = s3_client.get_bucket_policy(Bucket=bucket_name)
+            policy = policy_response['Policy']
             bucket_info['Policy'] = json.loads(policy)
-        except s3_client.exceptions.NoSuchBucketPolicy:
-            bucket_info['Policy'] = 'No policy attached'
         except s3_client.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == 'AccessDenied':
+            if e.response['Error']['Code'] == 'NoSuchBucketPolicy':
+                bucket_info['Policy'] = 'No policy attached'
+            elif e.response['Error']['Code'] == 'AccessDenied':
                 bucket_info['Policy'] = 'No permission to access'
             else:
                 bucket_info['Policy'] = f"Error: {e.response['Error']['Message']}"
