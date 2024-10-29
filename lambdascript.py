@@ -1,4 +1,3 @@
-
 import boto3
 import json
 
@@ -15,12 +14,14 @@ def list_lambda_functions():
             runtime = function.get('Runtime', 'N/A')
             memory_size = function.get('MemorySize', 'N/A')
             timeout = function.get('Timeout', 'N/A')
+            handler = function.get('Handler', 'N/A')
 
             function_info = {
                 'FunctionName': function_name,
                 'Runtime': runtime,
                 'MemorySize': memory_size,
                 'Timeout': timeout,
+                'Handler': handler,
                 'PackageType': package_type
             }
 
