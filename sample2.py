@@ -1,124 +1,133 @@
 import requests
-import time
 
-# Configuration variables
-BITBUCKET_WORKSPACE = "your_workspace"
-BITBUCKET_REPO = "your_bitbucket_repo"
+# Configuration
+BITBUCKET_WORKSPACE = "your_bitbucket_workspace"
+BITBUCKET_REPO_SLUG = "your_bitbucket_repo_slug"
 BITBUCKET_USERNAME = "your_bitbucket_username"
 BITBUCKET_APP_PASSWORD = "your_bitbucket_app_password"
-GITHUB_ORG = "your_github_organization"
+
+GITHUB_ORG = "your_github_org"
 GITHUB_REPO = "your_github_repo"
 GITHUB_TOKEN = "your_github_token"
 
-# Bitbucket API endpoints
-BITBUCKET_API_PR_URL = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{BITBUCKET_REPO}/pullrequests"
-GITHUB_API_PR_URL = f"https://api.github.com/repos/{GITHUB_ORG}/{GITHUB_REPO}/pulls"
-GITHUB_HEADERS = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+BITBUCKET_API_URL = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{BITBUCKET_REPO_SLUG}/pullrequests"
+GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
+HEADERS = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
 
-# Function to get all PRs from Bitbucket Cloud with pagination
-def get_bitbucket_prs():
-    prs = []
-    url = BITBUCKET_API_PR_URL
-    while url:
-        response = requests.get(url, auth=(BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD))
-        if response.status_code != 200:
+# Fetch merged PRs from Bitbucket
+def fetch_bitbucket_prs(state="MERGED"):
+    pr_list = []
+    next_url = BITBUCKET_API_URL + f"?state={state}"
+    
+    while next_url:
+        response = requests.get(next_url, auth=(BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD))
+        if response.status_code == 200:
+            data = response.json()
+            pr_list.extend(data.get("values", []))
+            next_url = data.get("next")  # Pagination
+        else:
             print(f"Failed to fetch PRs from Bitbucket: {response.status_code}, {response.text}")
             break
-        data = response.json()
-        prs.extend(data.get("values", []))
-        url = data.get("next")  # Pagination support for the next page
-    return prs
+    return pr_list
 
-# Function to create a PR on GitHub with error handling, retry limit, and logic to handle closed merged PRs
-def create_github_pr(pr, retries=5):
-    title = pr["title"]
-    body = pr.get("description", "")
-    source_branch = pr["source"]["branch"]["name"]
-    destination_branch = pr["destination"]["branch"]["name"]
-
-    # Check if the PR is merged or closed on Bitbucket
-    if pr.get("state") == "MERGED":
-        # Create a closed PR on GitHub to indicate this was already merged
-        print(f"Creating closed PR on GitHub for merged PR '{title}'")
-        pr_payload = {
-            "title": title,
-            "body": body,
-            "head": source_branch,
-            "base": destination_branch,
-            "state": "closed"  # Set state to closed in GitHub
+# Create a closed PR in GitHub
+def create_closed_pr(repo_id, base_ref_name, title, body):
+    query = """
+    mutation($repoId: ID!, $baseRefName: String!, $title: String!, $body: String!) {
+        createPullRequest(input: {
+            repositoryId: $repoId,
+            baseRefName: $baseRefName,
+            headRefName: "nonexistent-branch",
+            title: $title,
+            body: $body,
+            state: CLOSED
+        }) {
+            pullRequest {
+                id
+                title
+                state
+            }
         }
+    }
+    """
+    variables = {
+        "repoId": repo_id,
+        "baseRefName": base_ref_name,
+        "title": title,
+        "body": body
+    }
+
+    response = requests.post(GITHUB_GRAPHQL_URL, json={"query": query, "variables": variables}, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json()
     else:
-        # Create an open PR if it's not merged yet
-        print(f"Creating open PR on GitHub for PR '{title}'")
-        pr_payload = {
-            "title": title,
-            "body": body,
-            "head": source_branch,
-            "base": destination_branch
+        print(f"Failed to create PR: {response.status_code}, {response.text}")
+        return None
+
+# Add a comment to the PR
+def add_comment(pr_id, comment_body):
+    query = """
+    mutation($prId: ID!, $body: String!) {
+        addComment(input: {subjectId: $prId, body: $body}) {
+            commentEdge {
+                node {
+                    body
+                    createdAt
+                }
+            }
         }
+    }
+    """
+    variables = {
+        "prId": pr_id,
+        "body": comment_body
+    }
 
-    # Create the PR on GitHub
-    response = requests.post(GITHUB_API_PR_URL, headers=GITHUB_HEADERS, json=pr_payload)
-
-    if response.status_code == 201:
-        github_pr = response.json()
-        print(f"Successfully created PR '{title}' on GitHub.")
-        # Add a comment to indicate the merged status if closed
-        if pr.get("state") == "MERGED":
-            comment_payload = {"body": "This PR was previously merged in Bitbucket."}
-            comments_url = f"https://api.github.com/repos/{GITHUB_ORG}/{GITHUB_REPO}/issues/{github_pr['number']}/comments"
-            requests.post(comments_url, headers=GITHUB_HEADERS, json=comment_payload)
-        migrate_pr_comments(pr["id"], github_pr["number"])
-    elif response.status_code == 422:
-        print(f"PR '{title}' already exists on GitHub. Skipping.")
-    elif response.status_code == 403 and "secondary rate limit" in response.text:
-        if retries > 0:
-            print(f"Rate limit exceeded. Retrying after delay... ({retries} retries left)")
-            time.sleep(10)  # Adding delay if rate limited
-            create_github_pr(pr, retries - 1)  # Retry with decremented retry count
-        else:
-            print("Max retries reached. Skipping PR creation for:", title)
+    response = requests.post(GITHUB_GRAPHQL_URL, json={"query": query, "variables": variables}, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json()
     else:
-        print(f"Failed to create PR on GitHub: {response.status_code}, {response.text}")
+        print(f"Failed to add comment: {response.status_code}, {response.text}")
+        return None
 
-# Function to get all comments from a Bitbucket PR and post them to the corresponding GitHub PR
-def migrate_pr_comments(bitbucket_pr_id, github_pr_number):
-    comments_url = f"{BITBUCKET_API_PR_URL}/{bitbucket_pr_id}/comments"
-    while comments_url:
-        response = requests.get(comments_url, auth=(BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD))
-        if response.status_code != 200:
-            print(f"Failed to fetch comments for Bitbucket PR {bitbucket_pr_id}: {response.status_code}, {response.text}")
-            break
-        comments_data = response.json()
-        for comment in comments_data.get("values", []):
-            comment_text = comment["content"]["raw"]
-            comment_author = comment["user"]["display_name"]
-            comment_time = comment["created_on"]
-            
-            # Add timestamp and author info to the comment
-            formatted_comment = f"**Comment by {comment_author} on {comment_time}**\n\n{comment_text}"
-            
-            # Post comment to GitHub PR
-            github_comment_url = f"https://api.github.com/repos/{GITHUB_ORG}/{GITHUB_REPO}/issues/{github_pr_number}/comments"
-            response = requests.post(github_comment_url, headers=GITHUB_HEADERS, json={"body": formatted_comment})
-            
-            if response.status_code == 201:
-                print(f"Successfully migrated comment from Bitbucket PR {bitbucket_pr_id} to GitHub PR {github_pr_number}")
-            else:
-                print(f"Failed to migrate comment: {response.status_code}, {response.text}")
-        
-        # Move to the next page of comments
-        comments_url = comments_data.get("next")
+# Main Migration Logic
+def migrate_prs_to_github():
+    # Fetch merged PRs from Bitbucket
+    prs = fetch_bitbucket_prs(state="MERGED")
+    print(f"Fetched {len(prs)} merged PRs from Bitbucket.")
 
-# Main function to migrate PRs
-def migrate_prs():
-    print("Fetching PRs from Bitbucket Cloud...")
-    bitbucket_prs = get_bitbucket_prs()
+    # Get GitHub repository ID
+    repo_query = """
+    query($owner: String!, $name: String!) {
+        repository(owner: $owner, name: $name) {
+            id
+        }
+    }
+    """
+    variables = {"owner": GITHUB_ORG, "name": GITHUB_REPO}
+    response = requests.post(GITHUB_GRAPHQL_URL, json={"query": repo_query, "variables": variables}, headers=HEADERS)
+    if response.status_code != 200:
+        print(f"Failed to fetch GitHub repository ID: {response.status_code}, {response.text}")
+        return
+    repo_id = response.json()["data"]["repository"]["id"]
 
-    for pr in bitbucket_prs:
-        create_github_pr(pr)
+    # Migrate each PR
+    for pr in prs:
+        title = pr["title"]
+        body = pr.get("description", "")
+        base_ref = pr["destination"]["branch"]["name"]
+        author = pr["author"]["display_name"]
+        created_on = pr["created_on"]
 
-    print("Migration of PRs and comments complete.")
+        # Create a closed PR in GitHub
+        pr_response = create_closed_pr(repo_id, base_ref, title, body)
+        if pr_response:
+            pr_id = pr_response["data"]["createPullRequest"]["pullRequest"]["id"]
+            print(f"Created PR '{title}' as closed in GitHub.")
 
-# Run the migration
-migrate_prs()
+            # Add a comment indicating the author and creation date
+            comment_body = f"This PR was created by {author} on {created_on} and was merged in Bitbucket."
+            add_comment(pr_id, comment_body)
+
+if __name__ == "__main__":
+    migrate_prs_to_github()
