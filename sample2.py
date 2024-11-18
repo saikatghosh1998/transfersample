@@ -14,6 +14,31 @@ BITBUCKET_API_URL = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORK
 GITHUB_ISSUES_URL = f"https://api.github.com/repos/{GITHUB_ORG}/{GITHUB_REPO}/issues"
 HEADERS = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
 
+# Fetch PR activity for approvals and merge details
+def fetch_pr_activity(pr_id):
+    activity_url = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{BITBUCKET_REPO_SLUG}/pullrequests/{pr_id}/activity"
+    response = requests.get(activity_url, auth=(BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD))
+    approvals = []
+    merged_by = None
+
+    if response.status_code == 200:
+        activities = response.json().get("values", [])
+        print("Fetched Activity Data:")  # Debugging
+        print(activities)  # Print the raw activity data to inspect the structure
+
+        for activity in activities:
+            if "approval" in activity:
+                approvals.append({
+                    "approver": activity["approval"]["user"]["display_name"],
+                    "date": activity["approval"]["date"],
+                })
+            # Look for merge activity and debug its structure
+            if activity.get("update", {}).get("state") == "MERGED":
+                merged_by = activity.get("update", {}).get("author", {}).get("display_name", "Unknown")
+    else:
+        print(f"Failed to fetch PR activity: {response.status_code}, {response.text}")
+    
+    return approvals, merged_by
 # Fetch PRs from Bitbucket
 def fetch_bitbucket_prs(state="MERGED"):
     pr_list = []
