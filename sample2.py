@@ -91,6 +91,13 @@ def migrate_prs_to_github():
             f"{body}"
         )
 
+        if approvals:
+            issue_body += "**Approvals:**\n"
+            for approval in approvals:
+                issue_body += f"- {approval['approver']} on {approval['date']}\n"
+        if merged_by:
+            issue_body += f"\n**Merged By:** {merged_by}\n"
+
         # Use labels to differentiate merged PRs
         create_github_issue(title, issue_body, labels=["migrated-PR", "merged-PR"])
 
