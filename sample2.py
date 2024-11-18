@@ -11,10 +11,10 @@ GITHUB_REPO = "your_github_repo"
 GITHUB_TOKEN = "your_github_token"
 
 BITBUCKET_API_URL = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{BITBUCKET_REPO_SLUG}/pullrequests"
-GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
+GITHUB_ISSUES_URL = f"https://api.github.com/repos/{GITHUB_ORG}/{GITHUB_REPO}/issues"
 HEADERS = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
 
-# Fetch merged PRs from Bitbucket
+# Fetch PRs from Bitbucket
 def fetch_bitbucket_prs(state="MERGED"):
     pr_list = []
     next_url = BITBUCKET_API_URL + f"?state={state}"
@@ -30,104 +30,44 @@ def fetch_bitbucket_prs(state="MERGED"):
             break
     return pr_list
 
-# Create a closed PR in GitHub
-def create_closed_pr(repo_id, base_ref_name, title, body):
-    query = """
-    mutation($repoId: ID!, $baseRefName: String!, $title: String!, $body: String!) {
-        createPullRequest(input: {
-            repositoryId: $repoId,
-            baseRefName: $baseRefName,
-            headRefName: "nonexistent-branch",
-            title: $title,
-            body: $body,
-            state: CLOSED
-        }) {
-            pullRequest {
-                id
-                title
-                state
-            }
-        }
-    }
-    """
-    variables = {
-        "repoId": repo_id,
-        "baseRefName": base_ref_name,
+# Create a GitHub issue to simulate a PR
+def create_github_issue(title, body, labels):
+    payload = {
         "title": title,
-        "body": body
+        "body": body,
+        "labels": labels,
     }
-
-    response = requests.post(GITHUB_GRAPHQL_URL, json={"query": query, "variables": variables}, headers=HEADERS)
-    if response.status_code == 200:
-        return response.json()
+    response = requests.post(GITHUB_ISSUES_URL, json=payload, headers=HEADERS)
+    if response.status_code == 201:
+        print(f"Created issue for PR: {title}")
     else:
-        print(f"Failed to create PR: {response.status_code}, {response.text}")
-        return None
+        print(f"Failed to create issue: {response.status_code}, {response.text}")
 
-# Add a comment to the PR
-def add_comment(pr_id, comment_body):
-    query = """
-    mutation($prId: ID!, $body: String!) {
-        addComment(input: {subjectId: $prId, body: $body}) {
-            commentEdge {
-                node {
-                    body
-                    createdAt
-                }
-            }
-        }
-    }
-    """
-    variables = {
-        "prId": pr_id,
-        "body": comment_body
-    }
-
-    response = requests.post(GITHUB_GRAPHQL_URL, json={"query": query, "variables": variables}, headers=HEADERS)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"Failed to add comment: {response.status_code}, {response.text}")
-        return None
-
-# Main Migration Logic
+# Migrate PRs as issues
 def migrate_prs_to_github():
-    # Fetch merged PRs from Bitbucket
-    prs = fetch_bitbucket_prs(state="MERGED")
-    print(f"Fetched {len(prs)} merged PRs from Bitbucket.")
+    # Fetch merged PRs
+    merged_prs = fetch_bitbucket_prs(state="MERGED")
+    print(f"Fetched {len(merged_prs)} merged PRs.")
 
-    # Get GitHub repository ID
-    repo_query = """
-    query($owner: String!, $name: String!) {
-        repository(owner: $owner, name: $name) {
-            id
-        }
-    }
-    """
-    variables = {"owner": GITHUB_ORG, "name": GITHUB_REPO}
-    response = requests.post(GITHUB_GRAPHQL_URL, json={"query": repo_query, "variables": variables}, headers=HEADERS)
-    if response.status_code != 200:
-        print(f"Failed to fetch GitHub repository ID: {response.status_code}, {response.text}")
-        return
-    repo_id = response.json()["data"]["repository"]["id"]
-
-    # Migrate each PR
-    for pr in prs:
-        title = pr["title"]
-        body = pr.get("description", "")
-        base_ref = pr["destination"]["branch"]["name"]
+    for pr in merged_prs:
+        title = f"[Migrated PR] {pr['title']}"
         author = pr["author"]["display_name"]
         created_on = pr["created_on"]
+        body = pr.get("description", "No description provided.")
+        destination_branch = pr["destination"]["branch"]["name"]
+        source_branch = pr["source"]["branch"]["name"]
 
-        # Create a closed PR in GitHub
-        pr_response = create_closed_pr(repo_id, base_ref, title, body)
-        if pr_response:
-            pr_id = pr_response["data"]["createPullRequest"]["pullRequest"]["id"]
-            print(f"Created PR '{title}' as closed in GitHub.")
+        # Add PR metadata to the issue body
+        issue_body = (
+            f"**Author:** {author}\n"
+            f"**Created On:** {created_on}\n"
+            f"**Source Branch:** {source_branch}\n"
+            f"**Destination Branch:** {destination_branch}\n\n"
+            f"{body}"
+        )
 
-            # Add a comment indicating the author and creation date
-            comment_body = f"This PR was created by {author} on {created_on} and was merged in Bitbucket."
-            add_comment(pr_id, comment_body)
+        # Use labels to differentiate merged PRs
+        create_github_issue(title, issue_body, labels=["migrated-PR", "merged-PR"])
 
 if __name__ == "__main__":
     migrate_prs_to_github()
