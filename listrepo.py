@@ -1,49 +1,33 @@
 import requests
+from requests.auth import HTTPBasicAuth
 
-# Configuration
-BITBUCKET_WORKSPACE = "your_workspace"  # Replace with your Bitbucket Cloud workspace
-BITBUCKET_PROJECT = "your_project"  # Replace with your Bitbucket Cloud project key
-BITBUCKET_USERNAME = "your_username"  # Replace with your Bitbucket username
-BITBUCKET_APP_PASSWORD = "your_app_password"  # Replace with your Bitbucket app password
+# Replace with your Bitbucket Cloud credentials
+BITBUCKET_USERNAME = "your_username"  # Replace with your Bitbucket Cloud username
+BITBUCKET_API_TOKEN = "your_api_token"  # Replace with your API token
+WORKSPACE = "your_workspace"  # Replace with your workspace ID
 
-# Bitbucket API URL
-BITBUCKET_API_URL = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}"
+def list_bitbucket_projects(username, api_token, workspace):
+    url = f"https://api.bitbucket.org/2.0/workspaces/{workspace}/projects"
+    projects = []
+    params = {'pagelen': 100}  # Fetch 100 projects per page
 
-def list_repositories_in_project(project_key):
-    """
-    Fetch and list all repositories in a given Bitbucket Cloud project.
-    """
-    repo_list = []
-    next_url = BITBUCKET_API_URL + f"?q=project.key=\"{project_key}\""
+    while url:
+        response = requests.get(url, auth=HTTPBasicAuth(username, api_token), params=params)
+        if response.status_code != 200:
+            print(f"Failed to fetch projects: {response.status_code} - {response.text}")
+            return []
 
-    while next_url:
-        response = requests.get(next_url, auth=(BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD))
-        
-        if response.status_code == 200:
-            data = response.json()
-            for repo in data.get("values", []):
-                repo_list.append({
-                    "name": repo["name"],
-                    "slug": repo["slug"],
-                    "url": repo["links"]["html"]["href"],
-                })
-            next_url = data.get("next")  # Handle pagination
-        else:
-            print(f"Failed to fetch repositories: {response.status_code}, {response.text}")
-            break
+        data = response.json()
+        projects.extend(data.get("values", []))
+        url = data.get("next")  # Get the next page URL if available
 
-    return repo_list
-
-def main():
-    print(f"Fetching repositories in project: {BITBUCKET_PROJECT}")
-    repositories = list_repositories_in_project(BITBUCKET_PROJECT)
-    
-    if repositories:
-        print(f"Found {len(repositories)} repositories:")
-        for repo in repositories:
-            print(f"- Name: {repo['name']}, Slug: {repo['slug']}, URL: {repo['url']}")
-    else:
-        print("No repositories found or failed to fetch.")
+    return projects
 
 if __name__ == "__main__":
-    main()
+    projects = list_bitbucket_projects(BITBUCKET_USERNAME, BITBUCKET_API_TOKEN, WORKSPACE)
+    if projects:
+        print(f"Found {len(projects)} projects in workspace '{WORKSPACE}':")
+        for project in projects:
+            print(f"- {project['name']} (Key: {project['key']})")
+    else:
+        print("No projects found or failed to fetch projects.")
