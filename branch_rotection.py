@@ -1,1 +1,12 @@
-{"values": [{"id": 42743681, "kind": "require_passing_builds_to_merge", "value": 3, "branch_match_kind": "branching_model", "type": "branchrestriction", "users": [], "branch_type": "development", "pattern": "", "groups": [], "links": {"self": {"href": "https://api.bitbucket.org/2.0/repositories"}}}, {"id": 40816167, "kind": "enforce_merge_checks", "value": null, "branch_match_kind": "branching_model", "type": "branchrestriction", "users": [], "branch_type": "development", "pattern": "", "groups": [], "links": {"self": {"href": "https://api.bitbucket.org/2.0/repositories/knch-restrictions/40816167"}}}, {"id": 40112028, "kind": "delete", "value": null, "branch_match_kind": "branching_model", "type": "branchrestriction", "users": [], "branch_type": "development", "pattern": "", "groups": [], "links": {"self": {"href": "https://api.bitbucket.org/2.0/repositories/kenvue/ts-palladium-portal/branch-restrictions/40112028"}}}], "pagelen": 10, "size": 23, "page": 3, "previous": "https://api.bitbucket.org/2.0/repositories/kenvue/ts-palladium-portal/branch-restrictions?page=2"}
+def extract_bitbucket_branch_names(response):
+    branch_names = []
+    
+    # Iterate through the 'values' list in the response
+    for restriction in response.get('values', []):
+        branch_type = restriction.get('branch_type', None)
+        
+        # If branch_type is found, add it to the list
+        if branch_type and branch_type not in branch_names:
+            branch_names.append(branch_type)
+    
+    return branch_names
