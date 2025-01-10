@@ -1,1 +1,33 @@
-[{'id': 46744, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'no-deletes', 'matcher': {'id': 'develop', 'displayId': 'develop', 'type': {'id': 'BRANCH', 'name': 'Branch'}, 'active': False}, 'users': [], 'groups': [], 'accessKeys': []}, {'id': 46743, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'pull-request-only', 'matcher': {'id': 'develop', 'displayId': 'develop', 'type': {'id': 'BRANCH', 'name': 'Branch'}, 'active': False}, 'users': [], 'groups': [], 'accessKeys': []}, {'id': 46742, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'no-deletes', 'matcher': {'id': 'main', 'displayId': 'main', 'type': {'id': 'BRANCH', 'name': 'Branch'}, 'active': True}, 'users': [], 'groups': [], 'accessKeys': []}, {'id': 46741, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'pull-request-only', 'matcher': {'id': 'main', 'displayId': 'main', 'type': {'id': 'BRANCH', 'name': 'Branch'}, 'active': True}, 'users': [], 'groups': [], 'accessKeys': []}, {'id': 46578, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'no-deletes', 'matcher': {'id': 'RELEASE', 'displayId': 'Release', 'type': {'id': 'MODEL_CATEGORY', 'name': 'Branching model category'}, 'active': True}, 'users': [], 'groups': [], 'accessKeys': []}, {'id': 46577, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'pull-request-only', 'matcher': {'id': 'RELEASE', 'displayId': 'Release', 'type': {'id': 'MODEL_CATEGORY', 'name': 'Branching model category'}, 'active': True}, 'users': [], 'groups': [], 'accessKeys': []}, {'id': 46746, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'no-deletes', 'matcher': {'id': 'release/*', 'displayId': 'release/*', 'type': {'id': 'PATTERN', 'name': 'Pattern'}, 'active': True}, 'users': [], 'groups': [], 'accessKeys': []}, {'id': 46745, 'scope': {'type': 'PROJECT', 'resourceId': 30593}, 'type': 'pull-request-only', 'matcher': {'id': 'release/*', 'displayId': 'release/*', 'type': {'id': 'PATTERN', 'name': 'Pattern'}, 'active': True}, 'users': [], 'groups': [], 'accessKeys': []}]
+def map_to_github_branch_rules(bitbucket_rules):
+    github_rules = {}
+
+    for rule in bitbucket_rules:
+        branch_name = rule["matcher"]["id"]  # Get the branch or pattern
+        if branch_name not in github_rules:
+            github_rules[branch_name] = {
+                "required_status_checks": None,  # GitHub-specific, leave as None unless specified
+                "enforce_admins": True,
+                "required_pull_request_reviews": {
+                    "dismiss_stale_reviews": False,
+                    "require_code_owner_reviews": False,
+                    "required_approving_review_count": 1,  # Default to 1 approval
+                },
+                "restrictions": None,  # Restrict users/teams if needed
+                "allow_force_pushes": False,
+                "allow_deletions": True,  # Allow deletions unless overridden by a rule
+                "require_signed_commits": False,
+            }
+
+        # Map Bitbucket rule types
+        if rule["type"] == "no-deletes":
+            github_rules[branch_name]["allow_deletions"] = False
+
+        if rule["type"] == "pull-request-only":
+            github_rules[branch_name]["required_pull_request_reviews"]["required_approving_review_count"] = 1
+            github_rules[branch_name]["restrictions"] = {
+                "users": [],
+                "teams": [],
+                "apps": []
+            }
+
+    return github_rules
